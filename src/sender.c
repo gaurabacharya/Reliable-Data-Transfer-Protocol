@@ -16,7 +16,24 @@ void rsend(char* hostname,
             char* filename, 
             unsigned long long int bytesToTransfer) 
 {
+    // Step 1: Open the file
+    FILE* file = fopen(filename, "r");
+    if (file == NULL) {
+        fprintf(stderr, "Error: Unable to open file %s\n", filename);
+        exit(1);
+    }
 
+    // Step 2: Read the file into a buffer
+    unsigned char buffer[1024];
+    fread(buffer, 1, bytesToTransfer, file);
+
+    // Step 3: Create the UDP socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    // Step 4: Send the first bytesToTransfer bytes to the receiver
+    sock.sendto(buffer, (hostname, hostUDPport))
+
+    // Do some more error checking?
 }
 
 int main(int argc, char** argv) {
