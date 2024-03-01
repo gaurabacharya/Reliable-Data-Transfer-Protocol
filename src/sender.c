@@ -22,6 +22,7 @@ struct Packet {
     char data[MAX_DATA_SIZE];
 };
 
+// We don't have to calculate checksum (See #135)
 // Function to calculate checksum (simple checksum for demonstration)
 unsigned int calculate_checksum(struct Packet packet) {
     unsigned int sum = 0;
@@ -60,26 +61,28 @@ void rsend(char* hostname,
             char* filename, 
             unsigned long long int bytesToTransfer) 
 {
-    // Step 1: Open the file
-    FILE* file = fopen(filename, "r");
-    if (file == NULL) {
-        fprintf(stderr, "Error: Unable to open file %s\n", filename);
-        exit(EXIT_FAILURE);
-    }
+    int sockfd;
+    struct sockaddr_in receiver_addr;
 
     // Create UDP Socket 
-    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd == -1) {
         perror("socket");
         exit(EXIT_FAILURE);
     }
 
     // Initialize receiver address 
-    struct sockaddr_in receiver_addr;
     memset(&receiver_addr, 0, sizeof(receiver_addr));
     receiver_addr.sin_family = AF_INET;
     receiver_addr.sin_port = htons(hostUDPport);
     inet_pton(AF_INET, hostname, &receiver_addr.sin_addr);
+
+    // Open the file
+    FILE* file = fopen(filename, "r");
+    if (file == NULL) {
+        fprintf(stderr, "Error: Unable to open file %s\n", filename);
+        exit(EXIT_FAILURE);
+    }
 
     // Initialize sender window 
     // int base = 0;
@@ -97,7 +100,7 @@ void rsend(char* hostname,
         // Send packets in the current window
         for (int i = 0; i < window_size; i++) {
             // Read data from file
-            int bytes_read = fread(packets[i].data, 1, MAX_DATA_SIZE, file);
+            int bytes_read = fread(packets[i].data, bytesToTransfer, 1, file);
             if (bytes_read == 0) {
                 // End of file reached
                 break;
@@ -124,18 +127,6 @@ void rsend(char* hostname,
     // Close file and socket
     fclose(file);
     close(sockfd);
-
-    // Step 2: Read the file into a buffer
-    // unsigned char buffer[1024];
-    // fread(buffer, 1, bytesToTransfer, file);
-
-    // Step 3: Create the UDP socket
-    // sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-    // Step 4: Send the first bytesToTransfer bytes to the receiver
-    // sock.sendto(buffer, (hostname, hostUDPport))
-
-    // Do some more error checking?
 }
 
 
