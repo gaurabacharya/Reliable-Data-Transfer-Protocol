@@ -82,12 +82,14 @@ void rsend(char* hostname,
 
     // Create and send packets
     struct Packet packets[MAX_WINDOW_SIZE];
+    int totalBytesTransferred = 0;
 
-    while (!feof(file)) {
+    while (!feof(file) || totalBytesTransferred <= bytesToTransfer) {
         // Send packets in the current window
         for (int i = 0; i < window_size; i++) {
             // Read data from file
             int bytes_read = fread(packets[i].data, bytesToTransfer, 1, file);
+            totalBytesTransferred += bytes_read;
             if (bytes_read == 0) {
                 // End of file reached
                 break;
