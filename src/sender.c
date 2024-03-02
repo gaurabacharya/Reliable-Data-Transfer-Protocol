@@ -118,14 +118,22 @@ int main(int argc, char** argv) {
     int hostUDPport;
     unsigned long long int bytesToTransfer;
     char* hostname = NULL;
+    char* filename = NULL;
 
     if (argc != 5) {
         fprintf(stderr, "usage: %s receiver_hostname receiver_port filename_to_xfer bytes_to_xfer\n\n", argv[0]);
         exit(1);
-    }
-    hostUDPport = (unsigned short int) atoi(argv[2]);
+    } 
+
     hostname = argv[1];
+    hostUDPport = (unsigned short int) atoi(argv[2]);
+    filename = argv[3];
     bytesToTransfer = atoll(argv[4]);
 
+    //rsend(hostname, hostUDPport, filename, bytesToTransfer);
+    for (int i = 0; i < argc; i++) {
+        printf("%s", argv[i]);
+    }
+    
     return (EXIT_SUCCESS);
 }
