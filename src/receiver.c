@@ -73,7 +73,6 @@ void rrecv(unsigned short int myUDPport,
     // Close the socket:
     fclose(file);
     close(sockfd);
-
 }
 
 int main(int argc, char** argv) {
@@ -90,4 +89,6 @@ int main(int argc, char** argv) {
     }
 
     udpPort = (unsigned short int) atoi(argv[1]);
+    
+    rrecv(udpPort, "testfile", 0);
 }
