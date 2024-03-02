@@ -101,7 +101,7 @@ void rsend(char* hostname,
         }
 
         // Handle acknowledgments
-        handle_acknowledgments(sockfd, receiver_addr, &base_seq_num, window_size);
+        handle_acknowledgments(sockfd, receiver_addr, &base_seq_num);
     }
 
     // Close file and socket
@@ -130,10 +130,14 @@ int main(int argc, char** argv) {
     filename = argv[3];
     bytesToTransfer = atoll(argv[4]);
 
-    //rsend(hostname, hostUDPport, filename, bytesToTransfer);
+    printf("Arguments being used: \n");
     for (int i = 0; i < argc; i++) {
-        printf("%s", argv[i]);
+
+        printf("%s ", argv[i]);
+        printf("\n");
     }
-    
+
+    rsend(hostname, hostUDPport, filename, bytesToTransfer);
+
     return (EXIT_SUCCESS);
 }
