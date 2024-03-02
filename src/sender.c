@@ -18,20 +18,8 @@
 struct Packet {
     unsigned int seq_num;
     unsigned int ack_num;
-    unsigned int checksum;
     char data[MAX_DATA_SIZE];
 };
-
-// We don't have to calculate checksum (See #135)
-// Function to calculate checksum (simple checksum for demonstration)
-unsigned int calculate_checksum(struct Packet packet) {
-    unsigned int sum = 0;
-    int i;
-    for (i = 0; i < sizeof(packet); i++) {
-        sum += *((char*)&packet + i);
-    }
-    return sum;
-}
 
 // Function to send packet
 int send_packet(int sockfd, struct Packet packet, struct sockaddr_in receiver_addr) {
@@ -45,7 +33,7 @@ int send_packet(int sockfd, struct Packet packet, struct sockaddr_in receiver_ad
 }
 
 // Function to handle acknowledgments from the receiver
-void handle_acknowledgments(int sockfd, struct sockaddr_in receiver_addr, int *base_seq_num, int window_size) {
+void handle_acknowledgments(int sockfd, struct sockaddr_in receiver_addr, int *base_seq_num) {
     struct Packet ack_packet;
     socklen_t addr_len = sizeof(struct sockaddr);
 
@@ -107,8 +95,6 @@ void rsend(char* hostname,
 
             // Assign sequence number to packet
             packets[i].seq_num = base_seq_num + i;
-            packets[i].checksum = calculate_checksum(packets[i]);
-
 
             // Send packet
             send_packet(sockfd, *packets, receiver_addr);

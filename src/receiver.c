@@ -16,7 +16,6 @@
 struct Packet {
     unsigned int seq_num;
     unsigned int ack_num;
-    unsigned int checksum;
     char data[MAX_DATA_SIZE];
 };
 
