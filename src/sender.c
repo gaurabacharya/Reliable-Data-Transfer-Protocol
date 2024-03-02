@@ -101,7 +101,7 @@ void rsend(char* hostname,
         }
 
         // Handle acknowledgments
-        handle_acknowledgments(sockfd, receiver_addr, &base_seq_num, window_size);
+        handle_acknowledgments(sockfd, receiver_addr, &base_seq_num);
     }
 
     // Close file and socket
