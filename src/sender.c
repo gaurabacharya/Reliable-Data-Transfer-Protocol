@@ -87,7 +87,6 @@ void rsend(char* hostname,
     // Initialize sender window 
     // int base = 0;
     // int nextseqnum = 0;
-    bool bytesTransferring = true;
 
     // Initialize sequence number and window size
     int base_seq_num = 0;
@@ -96,7 +95,7 @@ void rsend(char* hostname,
     // Create and send packets
     struct Packet packets[MAX_WINDOW_SIZE];
 
-    while (bytesTransferring) {
+    while (!feof(file)) {
         // Send packets in the current window
         for (int i = 0; i < window_size; i++) {
             // Read data from file
@@ -112,16 +111,11 @@ void rsend(char* hostname,
 
 
             // Send packet
-            send_packets(sockfd, receiver_addr, packets, window_size);
+            send_packet(sockfd, *packets, receiver_addr);
         }
 
         // Handle acknowledgments
         handle_acknowledgments(sockfd, receiver_addr, &base_seq_num, window_size);
-
-        // Break if end of file reached
-        if (feof(file)) {
-            bytesTransferring = false;
-        }
     }
 
     // Close file and socket
