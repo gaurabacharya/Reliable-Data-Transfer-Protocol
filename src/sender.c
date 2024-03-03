@@ -14,12 +14,28 @@
 #define MAX_DATA_SIZE 1024
 #define MAX_WINDOW_SIZE 10
 #define TIMOUT_SEC 1 
+#define SEQ_NUM 1
+
+pthread_mutex_t packet_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t packet_sent_cond = PTHREAD_COND_INITIALIZER;
+int packet_is_sent = 0;
+
+void* check_acks(void* arg) {
+
+}
 
 struct Packet {
     unsigned int seq_num;
     unsigned int ack_num;
     char data[MAX_DATA_SIZE];
 };
+
+struct CheckAckArgs {
+    int* sockfd;
+    struct sockaddr_in *receiver_addr;
+    unsigned int *seq_num;
+    unsigned int *ack_num;
+}
 
 // Function to send packet
 int send_packet(int sockfd, struct Packet packet, struct sockaddr_in receiver_addr) {
@@ -31,6 +47,15 @@ int send_packet(int sockfd, struct Packet packet, struct sockaddr_in receiver_ad
     }
     return 0;
 }
+
+
+
+// unsigned int send_ack(int sockfd, struct sockaddr_in sender_addr, unsigned int seq_num, unsigned int ack_num) {
+//     struct Packet ack_packet;
+//     ack_packet.seq_num = seq_num;
+//     ack_packet.ack_num = ack_num;
+//     return send_packet(sockfd, ack_packet, sender_addr);
+// }
 
 // Function to handle acknowledgments from the receiver
 void handle_acknowledgments(int sockfd, struct sockaddr_in receiver_addr, int *base_seq_num) {
@@ -51,6 +76,14 @@ void rsend(char* hostname,
 {
     int sockfd;
     struct sockaddr_in receiver_addr;
+    char buffer[MAX_DATA_SIZE];
+    struct Packet send_packet;
+    struct Packet receive_packet; 
+    unsigned int currentSeqNum = SEQ_NUM;
+    unsigned int currentAckNum;
+    socklen_t addr_size;
+    pthread_t sender_thread_id;
+    pthread_t ack_thread_id;
 
     // Create UDP Socket 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -65,6 +98,28 @@ void rsend(char* hostname,
     receiver_addr.sin_port = htons(hostUDPport);
     inet_pton(AF_INET, hostname, &receiver_addr.sin_addr);
 
+    addr_size = sizeof(receiver_addr);
+
+    // Send first message to establish connection
+    send_packet.seq_num = currentSeqNum;
+    sendto(sockfd, &send_packet, sizeof(send_packet), 0, (struct sockaddr *)&receiver_addr, sizeof(receiver_addr));
+
+    // Receive write_rate from receiver
+    ssize_t numBytes = recvfrom(sockfd, &receive_packet, sizeof(receive_packet), 0, (struct sockaddr *)&receiver_addr, &addr_size);
+    if (receive_packet.ack_num != currentSeqNum) {
+        fprintf(stderr, "Error: Invalid sequence number\n");
+        exit(EXIT_FAILURE);
+    }
+
+    currentSeqNum++;
+    currentAckNum = receive_packet.seq_num;
+    
+    // Send ack to receiver
+    send_packet.seq_num = currentSeqNum;
+    send_packet.ack_num = currentAckNum;
+    sendto(sockfd, &send_packet, sizeof(send_packet), 0, (struct sockaddr *)&receiver_addr, sizeof(receiver_addr));
+    currentSeqNum++;
+
     // Open the file
     FILE* file = fopen(filename, "r");
     if (file == NULL) {
@@ -72,43 +127,104 @@ void rsend(char* hostname,
         exit(EXIT_FAILURE);
     }
 
-    // Initialize sender window 
-    // int base = 0;
-    // int nextseqnum = 0;
+    // Take the bytesToTransfer, divide it by writeRate, and then get the remainder, and then send each one 
+    // get the divider, take i from 0 to divider and sending those packets, then send the remainder packet, then finish
+    // Your implementation should support flow control via a sliding window mechanism to ensure that the receiver is not overwhelmed. 
+    // Up to this point, one could have assumed that writeRate at the receiver is not limited (i.e., writeRate == 0). 
+    // When writeRate is limited, the receiver cannot maintain an infinite buffer and should signal to the sender to reduce the data transmission rate to be consistent with writeRate.
+    // When flow control is needed then some of the bandwidth utilization expectations will change to be consistent with flow control.
 
-    // Initialize sequence number and window size
-    int base_seq_num = 0;
-    int window_size = MAX_WINDOW_SIZE;
+    //setup struct for variables that need to be passed to threads 
+    struct CheckAckArgs ack_args;
+    ack_args.sockfd = &sockfd;
+    ack_args.receiver_addr = &receiver_addr;
+    ack_args.seq_num = &currentSeqNum;
+    ack_args.ack_num = &currentAckNum;
 
-    // Create and send packets
-    struct Packet packets[MAX_WINDOW_SIZE];
-    int totalBytesTransferred = 0;
+    // create thread for sender 
+    pthread_create(&ack_thread_id, NULL, &check_acks, ack_args);
 
+    // Step 1: Send 10 packets into network without waiting for any ACKs
+    // Step 2: Receive ACK for the first packet sent and increase cwnd by 1
+    
     while (!feof(file) || totalBytesTransferred <= bytesToTransfer) {
         // Send packets in the current window
-        for (int i = 0; i < window_size; i++) {
+            struct Packet currPacket;
             // Read data from file
-            int bytes_read = fread(packets[i].data, bytesToTransfer, 1, file);
+            int bytes_read = fread(currPacket.data, bytesToTransfer, 1, file);
             totalBytesTransferred += bytes_read;
             if (bytes_read == 0) {
                 // End of file reached
                 break;
             }
-
-            // Assign sequence number to packet
-            packets[i].seq_num = base_seq_num + i;
-
-            // Send packet
-            send_packet(sockfd, *packets, receiver_addr);
         }
-
-        // Handle acknowledgments
-        handle_acknowledgments(sockfd, receiver_addr, &base_seq_num);
     }
+    //         // Assign sequence number to packet
+    //         packets[i].seq_num = base_seq_num + i;
 
-    // Close file and socket
-    fclose(file);
-    close(sockfd);
+    //         // Send packet
+    //         send_packet(sockfd, *packets, receiver_addr);
+    //     }
+
+    //     // Handle acknowledgments
+    //     handle_acknowledgments(sockfd, receiver_addr, &base_seq_num);
+    // }
+
+    // // Transfer data from file to the receiver
+    // while (!feof(file)) {
+    //     bytesRead = fread(buffer, 1, sizeof(buffer), file);
+    //     if (bytesRead <= 0) {
+    //         break;
+    //     }
+
+    //     if (sendto(sockfd, buffer, bytesRead, 0, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+    //         perror("sendto");
+    //         exit(EXIT_FAILURE);
+    //     }
+
+    //     printf("Sent %ld bytes\n", bytesRead);
+
+    //     bytesToTransfer -= bytesRead;
+    // }
+
+    // // Initialize sender window 
+    // // int base = 0;
+    // // int nextseqnum = 0;
+
+    // // Initialize sequence number and window size
+    // int base_seq_num = 0;
+    // int window_size = MAX_WINDOW_SIZE;
+
+    // // Create and send packets
+    // struct Packet packets[MAX_WINDOW_SIZE];
+    // int totalBytesTransferred = 0;
+
+    // while (!feof(file) || totalBytesTransferred <= bytesToTransfer) {
+    //     // Send packets in the current window
+    //     for (int i = 0; i < window_size; i++) {
+    //         // Read data from file
+    //         int bytes_read = fread(packets[i].data, bytesToTransfer, 1, file);
+    //         totalBytesTransferred += bytes_read;
+    //         if (bytes_read == 0) {
+    //             // End of file reached
+    //             break;
+    //         }
+    //     }
+    // }
+    // //         // Assign sequence number to packet
+    // //         packets[i].seq_num = base_seq_num + i;
+
+    // //         // Send packet
+    // //         send_packet(sockfd, *packets, receiver_addr);
+    // //     }
+
+    // //     // Handle acknowledgments
+    // //     handle_acknowledgments(sockfd, receiver_addr, &base_seq_num);
+    // // }
+
+    // // Close file and socket
+    // fclose(file);
+    // close(sockfd);
 }
 
 
@@ -132,12 +248,12 @@ int main(int argc, char** argv) {
     filename = argv[3];
     bytesToTransfer = atoll(argv[4]);
 
-    printf("Arguments being used: \n");
-    for (int i = 0; i < argc; i++) {
+    // printf("Arguments being used: \n");
+    // for (int i = 0; i < argc; i++) {
 
-        printf("%s ", argv[i]);
-        printf("\n");
-    }
+    //     printf("%s ", argv[i]);
+    //     printf("\n");
+    // }
 
     rsend(hostname, hostUDPport, filename, bytesToTransfer);
 
