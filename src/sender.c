@@ -18,7 +18,7 @@
 
 pthread_mutex_t packet_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t packet_sent_cond = PTHREAD_COND_INITIALIZER;
-int packet_is_sent = 0;
+int cwnd = 1;
 
 void* check_acks(void* arg) {
 
@@ -31,11 +31,11 @@ struct Packet {
 };
 
 struct CheckAckArgs {
-    int* sockfd;
+    int *sockfd;
     struct sockaddr_in *receiver_addr;
     unsigned int *seq_num;
     unsigned int *ack_num;
-}
+};
 
 // Function to send packet
 int send_packet(int sockfd, struct Packet packet, struct sockaddr_in receiver_addr) {
@@ -54,7 +54,7 @@ int send_packet(int sockfd, struct Packet packet, struct sockaddr_in receiver_ad
 //     struct Packet ack_packet;
 //     ack_packet.seq_num = seq_num;
 //     ack_packet.ack_num = ack_num;
-//     return send_packet(sockfd, ack_packet, sender_addr);
+//     return sender_packet(sockfd, ack_packet, sender_addr);
 // }
 
 // Function to handle acknowledgments from the receiver
@@ -77,13 +77,15 @@ void rsend(char* hostname,
     int sockfd;
     struct sockaddr_in receiver_addr;
     char buffer[MAX_DATA_SIZE];
-    struct Packet send_packet;
+    struct Packet sender_packet;
     struct Packet receive_packet; 
     unsigned int currentSeqNum = SEQ_NUM;
     unsigned int currentAckNum;
     socklen_t addr_size;
     pthread_t sender_thread_id;
     pthread_t ack_thread_id;
+    unsigned long long int bytesTransferred = 0;
+    unsigned int cwnd = 1;
 
     // Create UDP Socket 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -101,8 +103,9 @@ void rsend(char* hostname,
     addr_size = sizeof(receiver_addr);
 
     // Send first message to establish connection
-    send_packet.seq_num = currentSeqNum;
-    sendto(sockfd, &send_packet, sizeof(send_packet), 0, (struct sockaddr *)&receiver_addr, sizeof(receiver_addr));
+    sender_packet.seq_num = currentSeqNum;
+    send_packet(sockfd, sender_packet, receiver_addr);
+    // sendto(sockfd, &sender_packet, sizeof(sender_packet), 0, (struct sockaddr *)&receiver_addr, sizeof(receiver_addr));
 
     // Receive write_rate from receiver
     ssize_t numBytes = recvfrom(sockfd, &receive_packet, sizeof(receive_packet), 0, (struct sockaddr *)&receiver_addr, &addr_size);
@@ -115,9 +118,10 @@ void rsend(char* hostname,
     currentAckNum = receive_packet.seq_num;
     
     // Send ack to receiver
-    send_packet.seq_num = currentSeqNum;
-    send_packet.ack_num = currentAckNum;
-    sendto(sockfd, &send_packet, sizeof(send_packet), 0, (struct sockaddr *)&receiver_addr, sizeof(receiver_addr));
+    sender_packet.seq_num = currentSeqNum;
+    sender_packet.ack_num = currentAckNum;
+    send_packet(sockfd, sender_packet, receiver_addr);
+    // sendto(sockfd, &sender_packet, sizeof(sender_packet), 0, (struct sockaddr *)&receiver_addr, sizeof(receiver_addr));
     currentSeqNum++;
 
     // Open the file
@@ -142,17 +146,19 @@ void rsend(char* hostname,
     ack_args.ack_num = &currentAckNum;
 
     // create thread for sender 
-    pthread_create(&ack_thread_id, NULL, &check_acks, ack_args);
+    pthread_create(&ack_thread_id, NULL, &check_acks, (void *)&ack_args);
 
     // Step 1: Send 10 packets into network without waiting for any ACKs
     // Step 2: Receive ACK for the first packet sent and increase cwnd by 1
     
-    while (!feof(file) || totalBytesTransferred <= bytesToTransfer) {
+    while (!feof(file) || bytesTransferred <= bytesToTransfer) {
         // Send packets in the current window
+        for (int i = 0; i < cwnd; i++) {
             struct Packet currPacket;
             // Read data from file
             int bytes_read = fread(currPacket.data, bytesToTransfer, 1, file);
-            totalBytesTransferred += bytes_read;
+            bytesTransferred += bytes_read;
+            currPacket.seq_num = currentSeqNum;
             if (bytes_read == 0) {
                 // End of file reached
                 break;
@@ -163,7 +169,7 @@ void rsend(char* hostname,
     //         packets[i].seq_num = base_seq_num + i;
 
     //         // Send packet
-    //         send_packet(sockfd, *packets, receiver_addr);
+    //         sender_packet(sockfd, *packets, receiver_addr);
     //     }
 
     //     // Handle acknowledgments
@@ -215,7 +221,7 @@ void rsend(char* hostname,
     // //         packets[i].seq_num = base_seq_num + i;
 
     // //         // Send packet
-    // //         send_packet(sockfd, *packets, receiver_addr);
+    // //         sender_packet(sockfd, *packets, receiver_addr);
     // //     }
 
     // //     // Handle acknowledgments
