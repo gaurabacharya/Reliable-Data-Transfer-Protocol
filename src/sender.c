@@ -11,24 +11,21 @@
 #include <pthread.h>
 #include <errno.h>
 
+#include "./include/packet.h"
+
 #define MAX_DATA_SIZE 1024
 #define MAX_WINDOW_SIZE 10
 #define TIMOUT_SEC 1 
 #define SEQ_NUM 1
+#define MSS 1460
 
 pthread_mutex_t packet_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t packet_sent_cond = PTHREAD_COND_INITIALIZER;
-int cwnd = 1;
+unsigned int cwnd = 1;
 
 void* check_acks(void* arg) {
 
 }
-
-struct Packet {
-    unsigned int seq_num;
-    unsigned int ack_num;
-    char data[MAX_DATA_SIZE];
-};
 
 struct CheckAckArgs {
     int *sockfd;
@@ -48,7 +45,55 @@ int send_packet(int sockfd, struct Packet packet, struct sockaddr_in receiver_ad
     return 0;
 }
 
+void connect_to_receiver(int sockfd, struct Packet sending_packet, struct Packet receive_packet, 
+             struct sockaddr_in receiver_addr) {
+    
+    // Send first message to establish connection
+    int currentSeqNum = SEQ_NUM;
+    sending_packet.seqNum = currentSeqNum;
+    sending_packet.synBit = 1;
+    send_packet(sockfd, sending_packet, receiver_addr);
+    // sendto(sockfd, &sender_packet, sizeof(sender_packet), 0, (struct sockaddr *)&receiver_addr, sizeof(receiver_addr));
 
+    // Receive write_rate from receiver
+    ssize_t numBytes = recvfrom(sockfd, &receive_packet, sizeof(receive_packet), 0, (struct sockaddr *)&receiver_addr, &addr_size);
+    if (receive_packet.ackNum != sender_packet.synBit) {
+        fprintf(stderr, "Error: Invalid sequence number\n");
+        exit(EXIT_FAILURE);
+    }
+
+    currentSeqNum++;
+    
+    // Send ack to receiver
+    sender_packet.ackNum = receive_packet.seqNum;
+    sender_packet.ackBit = receive_packet.ackBit;
+    send_packet(sockfd, sender_packet, receiver_addr);
+}
+
+void disconnect_from_receiver(int sockfd, struct Packet sending_packet, struct Packet receive_packet, 
+                struct sockaddr_in receiver_addr, int currentSeqNum) {
+
+    connection_finished = 0;
+
+    while(!connection_finished) {
+        sending_packet.seqNum = currentSeqNum;
+        sending_packet.finBit = 1;
+        send_packet(sockfd, sending_packet, receiver_addr);
+
+        if (recvfrom(sockfd, &receive_packet, sizeof(receive_packet), 0, (struct sockaddr *)&receiver_addr, &addr_size) < 0) {
+            perror("Error: Failed to receive first packet during disconnect.");
+            exit(EXIT_FAILURE);
+        }
+        if (receive_packet.ackBit != sending_packet.finBit) {
+            fprintf(stderr, "Error: Invalid sequence number\n");
+            exit(EXIT_FAILURE);
+        }
+
+        
+
+        
+    }
+}
 
 // unsigned int send_ack(int sockfd, struct sockaddr_in sender_addr, unsigned int seq_num, unsigned int ack_num) {
 //     struct Packet ack_packet;
@@ -58,14 +103,23 @@ int send_packet(int sockfd, struct Packet packet, struct sockaddr_in receiver_ad
 // }
 
 // Function to handle acknowledgments from the receiver
-void handle_acknowledgments(int sockfd, struct sockaddr_in receiver_addr, int *base_seq_num) {
+int handle_acknowledgments(int sockfd, struct sockaddr_in receiver_addr, int* current_seq_num, int* current_ack_num) {
     struct Packet ack_packet;
     socklen_t addr_len = sizeof(struct sockaddr);
 
-    while (recvfrom(sockfd, &ack_packet, sizeof(struct Packet), 0, (struct sockaddr *)&receiver_addr, &addr_len) > 0) {
-        if (ack_packet.ack_num >= *base_seq_num) {
-            *base_seq_num = ack_packet.ack_num + 1; // Slide window forward
+    // while (recvfrom(sockfd, &ack_packet, sizeof(struct Packet), 0, (struct sockaddr *)&receiver_addr, &addr_len) > 0) {
+    //     if (ack_packet.ack_num >= *base_seq_num) {
+    //         *base_seq_num = ack_packet.ack_num + 1; // Slide window forward
+    //     }
+    // }
+
+    recvfrom(sockfd, &ack_packet, sizeof(struct Packet), 0, (struct sockaddr *)&receiver_addr, &addr_len);
+    if (ack_packet.ack_num != ack_packet.seq_num) {
+        if (ack_packet.ack_num == current_ack_num){
+            cwnd = cwnd / 2; 
         }
+    } else if () {
+        ack_packet.data_size 
     }
 }
 
@@ -101,28 +155,7 @@ void rsend(char* hostname,
     inet_pton(AF_INET, hostname, &receiver_addr.sin_addr);
 
     addr_size = sizeof(receiver_addr);
-
-    // Send first message to establish connection
-    sender_packet.seq_num = currentSeqNum;
-    send_packet(sockfd, sender_packet, receiver_addr);
-    // sendto(sockfd, &sender_packet, sizeof(sender_packet), 0, (struct sockaddr *)&receiver_addr, sizeof(receiver_addr));
-
-    // Receive write_rate from receiver
-    ssize_t numBytes = recvfrom(sockfd, &receive_packet, sizeof(receive_packet), 0, (struct sockaddr *)&receiver_addr, &addr_size);
-    if (receive_packet.ack_num != currentSeqNum) {
-        fprintf(stderr, "Error: Invalid sequence number\n");
-        exit(EXIT_FAILURE);
-    }
-
-    currentSeqNum++;
-    currentAckNum = receive_packet.seq_num;
-    
-    // Send ack to receiver
-    sender_packet.seq_num = currentSeqNum;
-    sender_packet.ack_num = currentAckNum;
-    send_packet(sockfd, sender_packet, receiver_addr);
-    // sendto(sockfd, &sender_packet, sizeof(sender_packet), 0, (struct sockaddr *)&receiver_addr, sizeof(receiver_addr));
-    currentSeqNum++;
+    connect(sockfd, sending_packet, receive_packet, receiver_addr);
 
     // Open the file
     FILE* file = fopen(filename, "r");
@@ -139,31 +172,40 @@ void rsend(char* hostname,
     // When flow control is needed then some of the bandwidth utilization expectations will change to be consistent with flow control.
 
     //setup struct for variables that need to be passed to threads 
-    struct CheckAckArgs ack_args;
-    ack_args.sockfd = &sockfd;
-    ack_args.receiver_addr = &receiver_addr;
-    ack_args.seq_num = &currentSeqNum;
-    ack_args.ack_num = &currentAckNum;
+    // struct CheckAckArgs ack_args;
+    // ack_args.sockfd = &sockfd;
+    // ack_args.receiver_addr = &receiver_addr;
+    // ack_args.seq_num = &currentSeqNum;
+    // ack_args.ack_num = &currentAckNum;
 
     // create thread for sender 
-    pthread_create(&ack_thread_id, NULL, &check_acks, (void *)&ack_args);
+    // pthread_create(&ack_thread_id, NULL, &check_acks, (void *)&ack_args);
 
     // Step 1: Send 10 packets into network without waiting for any ACKs
     // Step 2: Receive ACK for the first packet sent and increase cwnd by 1
-    
+    uint16_t finBit = 0;
+    while ()
     while (!feof(file) || bytesTransferred <= bytesToTransfer) {
         // Send packets in the current window
+        struct Packet packets[cwnd];
         for (int i = 0; i < cwnd; i++) {
-            struct Packet currPacket;
+            struct Packet ack_packet;
             // Read data from file
-            int bytes_read = fread(currPacket.data, bytesToTransfer, 1, file);
-            bytesTransferred += bytes_read;
-            currPacket.seq_num = currentSeqNum;
+            size_t bytes_read = fread(packets[i].data, MSS, 1, file);
             if (bytes_read == 0) {
                 // End of file reached
                 break;
             }
+            bytesTransferred += bytes_read;
+            currPacket.seq_num = currentSeqNum;
+            currPacket.data_size = bytes_read;
+            send_packet(sockfd, currPacket, receiver_addr);
+            recvfrom(sockfd, &ack_packet, sizeof(struct Packet), 0, (struct sockaddr *)&receiver_addr, &addr_len);
+            
+            if (ack_packet.)
         }
+        
+        
     }
     //         // Assign sequence number to packet
     //         packets[i].seq_num = base_seq_num + i;
