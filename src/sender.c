@@ -62,7 +62,7 @@ void *send_packets_continuously(void *arg) {
             currPacket.finBit = 1;
         }
 
-        if (send_packet(packet_args->sockfd, currPacket, *packet_args->receiver_addr) < 0) {
+        if (sendto(packet_args->sockfd, &currPacket, sizeof(&currPacket), 0, packet_args->receiver_addr, sizeof(packet_args->receiver_addr)) < 0) {
             perror("Error: Failed to send first packet during disconnect.");
             exit(EXIT_FAILURE);
         }
@@ -134,7 +134,7 @@ void disconnect_from_receiver(int sockfd, struct Packet sending_packet, struct P
             exit(EXIT_FAILURE);
         }
 
-        if (recvfrom(sockfd, &receive_packet, sizeof(receive_packet), 0, (struct sockaddr *)&receiver_addr, &addr_size) < 0) {
+        if (recvfrom(sockfd, &receive_packet, sizeof(receive_packet), 0, (struct sockaddr *)&receiver_addr, sizeof(receiver_addr)) < 0) {
             perror("Error: Failed to receive first packet during disconnect.");
             exit(EXIT_FAILURE);
         }
@@ -234,7 +234,7 @@ void rsend(char* hostname,
 
     if (pthread_mutex_init(&thread_lock, NULL) != 0) { 
         printf("\n mutex init has failed\n"); 
-        return 1; 
+        exit(EXIT_FAILURE); 
     } 
 
     if (pthread_create(&sender_thread_id, NULL, send_packets_continuously, (void *)&sendArgs)) {
