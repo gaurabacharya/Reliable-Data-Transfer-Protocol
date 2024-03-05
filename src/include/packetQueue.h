@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "./packet.h"
+
 struct PacketQueue {
     struct Packet   *packets;
     int             front;

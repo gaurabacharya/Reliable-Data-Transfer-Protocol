@@ -40,43 +40,61 @@ struct SendThreadArgs {
     struct sockaddr_in *receiver_addr;
     unsigned long long int* bytesTransferred;
     unsigned long long int bytesToTransfer;
+    socklen_t addrLen;
 };
 
 void *send_packets_continuously(void *arg) {
     struct Packet currPacket;
     struct SendThreadArgs *packet_args = (struct SendThreadArgs *) arg;
-    long int currentLine = packet_args->currentSeq * MSS;
+    long int currentLine = (packet_args->currentSeq - 1) * MSS;
 
     if (fseek(packet_args->file, currentLine, SEEK_SET) != 0) {
         perror("Error - wrong seek line");
     }
 
-    while (packet_args->bytesTransferred <= packet_args->bytesToTransfer && !feof(packet_args->file) && continue_thread) {
+    printf("packet_args->bytesTransferred: %llu\n", packet_args->bytesTransferred);
+    printf("packet_args->bytesToTransfer: %llu\n", packet_args->bytesToTransfer);
+    printf("feof(packet_args->file): %d\n", feof(packet_args->file));
+    printf("continue_thread: %d\n", continue_thread);
+    if ((packet_args->bytesTransferred <= packet_args->bytesToTransfer)) {
+        printf("bytes is less than bytes to transfer\n");
+    }
+
+    while ((packet_args->bytesTransferred <= packet_args->bytesToTransfer) && (!feof(packet_args->file)) && (continue_thread)) {
+        printf("Entered while loop\n");
+        
         currPacket.seqNum = packet_args->currentSeq;
         currPacket.ackNum = 0;
         currPacket.ackBit = 0;
         currPacket.finBit = 0;
         currPacket.dataSize = fread(&currPacket.data, 1, MSS, packet_args->file);
 
+        printf("Sending packet with sequence number %d\n", packet_args->currentSeq);
+
         if (feof(packet_args->file) || currPacket.dataSize == 0) {
             currPacket.finBit = 1;
+            printf("Sending FIN packet\n");
         }
 
-        if (sendto(packet_args->sockfd, &currPacket, sizeof(&currPacket), 0, packet_args->receiver_addr, sizeof(packet_args->receiver_addr)) < 0) {
+        if (sendto(packet_args->sockfd, &currPacket, sizeof(currPacket), 0, packet_args->receiver_addr, packet_args->addrLen) < 0) {
             perror("Error: Failed to send first packet during disconnect.");
             exit(EXIT_FAILURE);
         }
+
+        printf("Sent packet with sequence number %d\n", packet_args->currentSeq);
 
         sleep(SECOND / send_rate);
         packet_args->currentSeq++;
         send_rate = send_rate + INCREASE_RATE;
     }
+
+    printf("Exited while loop\n");
 }
 
 // Function to send packet
-int send_packet(int sockfd, struct Packet packet, struct sockaddr_in receiver_addr) {
+int send_packet(int sockfd, struct Packet packet, struct sockaddr_in receiver_addr, socklen_t addrLen) {
     ssize_t bytes_sent = sendto(sockfd, &packet, sizeof(packet), 0,
-                                (struct sockaddr *)&receiver_addr, sizeof(receiver_addr));
+                                (struct sockaddr *)&receiver_addr, addrLen);
     if (bytes_sent == -1) {
         perror("sendto");
         return -1;
@@ -85,7 +103,7 @@ int send_packet(int sockfd, struct Packet packet, struct sockaddr_in receiver_ad
 }
 
 void connect_to_receiver(int sockfd, struct Packet sending_packet, struct Packet receive_packet, 
-             struct sockaddr_in receiver_addr) {
+             struct sockaddr_in receiver_addr, socklen_t addrLen) {
     
     int connection_finished = 0;
     int currentSeqNum = SEQ_NUM;
@@ -94,15 +112,21 @@ void connect_to_receiver(int sockfd, struct Packet sending_packet, struct Packet
         sending_packet.seqNum = currentSeqNum;
         sending_packet.synBit = 1;
 
-        if (send_packet(sockfd, sending_packet, receiver_addr) < 0) {
+        if (send_packet(sockfd, sending_packet, receiver_addr, addrLen) < 0) {
             perror("Error: Failed to send first packet during disconnect.");
             exit(EXIT_FAILURE);
         }
 
-        if (recvfrom(sockfd, &receive_packet, sizeof(receive_packet), 0, (struct sockaddr *)&receiver_addr, sizeof(receiver_addr)) < 0) {
+        printf("Sent SYN packet\n");
+
+        if (recvfrom(sockfd, &receive_packet, sizeof(receive_packet), 0, (struct sockaddr *)&receiver_addr, &addrLen) < 0) {
             perror("Error: Failed to receive first packet during disconnect.");
             exit(EXIT_FAILURE);
         }
+
+        printf("Received packet with sequence number %d\n", receive_packet.seqNum);
+
+        printf("Received SYN-ACK packet\n");
 
         if (receive_packet.ackBit != sending_packet.synBit) {
             printf(stderr, "Error: Invalid sequence number\n");
@@ -110,7 +134,7 @@ void connect_to_receiver(int sockfd, struct Packet sending_packet, struct Packet
             currentSeqNum++;
             sending_packet.ackNum = receive_packet.seqNum;
             sending_packet.ackBit = receive_packet.synBit;
-            if (send_packet(sockfd, sending_packet, receiver_addr) < 0) {
+            if (send_packet(sockfd, sending_packet, receiver_addr, addrLen) < 0) {
                 perror("Error: Failed to send third packet during disconnect.");
                 exit(EXIT_FAILURE);
             } else {
@@ -121,20 +145,20 @@ void connect_to_receiver(int sockfd, struct Packet sending_packet, struct Packet
 }
 
 void disconnect_from_receiver(int sockfd, struct Packet sending_packet, struct Packet receive_packet, 
-                struct sockaddr_in receiver_addr, int currentSeqNum) {
-
+                struct sockaddr_in receiver_addr, int currentSeqNum, socklen_t addrLen) {
+    printf("Entered disconnect function");
     int connection_finished = 0;
 
     while(!connection_finished) {
         sending_packet.seqNum = currentSeqNum;
         sending_packet.finBit = 1;
 
-        if (send_packet(sockfd, sending_packet, receiver_addr) < 0) {
+        if (send_packet(sockfd, sending_packet, receiver_addr, addrLen) < 0) {
             perror("Error: Failed to send first packet during disconnect.");
             exit(EXIT_FAILURE);
         }
 
-        if (recvfrom(sockfd, &receive_packet, sizeof(receive_packet), 0, (struct sockaddr *)&receiver_addr, sizeof(receiver_addr)) < 0) {
+        if (recvfrom(sockfd, &receive_packet, sizeof(receive_packet), 0, (struct sockaddr *)&receiver_addr, &addrLen) < 0) {
             perror("Error: Failed to receive first packet during disconnect.");
             exit(EXIT_FAILURE);
         }
@@ -145,7 +169,7 @@ void disconnect_from_receiver(int sockfd, struct Packet sending_packet, struct P
             currentSeqNum++;
             sending_packet.ackNum = receive_packet.seqNum;
             sending_packet.ackBit = receive_packet.finBit;
-            if (send_packet(sockfd, sending_packet, receiver_addr) < 0) {
+            if (send_packet(sockfd, sending_packet, receiver_addr, addrLen) < 0) {
                 perror("Error: Failed to send third packet during disconnect.");
                 exit(EXIT_FAILURE);
             } else {
@@ -195,12 +219,12 @@ void rsend(char* hostname,
     struct Packet receive_packet; 
     unsigned int currentSeqNum = SEQ_NUM;
     unsigned int currentAckNum;
-    socklen_t addr_size;
     pthread_t sender_thread_id;
     pthread_t ack_thread_id;
     unsigned long long int* bytesTransferred = 0;
     unsigned int cwnd = 1;
     struct SendThreadArgs sendArgs;
+    socklen_t addrLen;
 
     // Create UDP Socket 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -215,9 +239,10 @@ void rsend(char* hostname,
     receiver_addr.sin_port = htons(hostUDPport);
     inet_pton(AF_INET, hostname, &receiver_addr.sin_addr);
 
-    addr_size = sizeof(receiver_addr);
-    connect_to_receiver(sockfd, sender_packet, receive_packet, receiver_addr);
+    addrLen = sizeof(receiver_addr);
+    connect_to_receiver(sockfd, sender_packet, receive_packet, receiver_addr, addrLen);
 
+    printf("Connected to receiver\n");
     // Open the file
     FILE* file = fopen(filename, "r");
     if (file == NULL) {
@@ -229,8 +254,11 @@ void rsend(char* hostname,
     sendArgs.currentSeq = 1;
     sendArgs.sockfd = sockfd;
     sendArgs.receiver_addr = &receiver_addr;
-    sendArgs.bytesTransferred = &bytesTransferred;
+    sendArgs.bytesTransferred = bytesTransferred;
     sendArgs.bytesToTransfer = bytesToTransfer;
+    sendArgs.addrLen = addrLen;
+
+    printf("About to start sending\n");
 
     if (pthread_mutex_init(&thread_lock, NULL) != 0) { 
         printf("\n mutex init has failed\n"); 
@@ -242,14 +270,21 @@ void rsend(char* hostname,
         exit(EXIT_FAILURE);
     }
 
+    printf("Thread created\n");
     currentSeqNum = 1;
 
     int finBitSent = 0;
     while (!finBitSent) {
         struct Packet ackPacket;
-        size_t bytes_read = recvfrom(sockfd, &ackPacket, sizeof(ackPacket), 0, &receiver_addr, sizeof(receiver_addr));
+        if (recvfrom(sockfd, &ackPacket, sizeof(ackPacket), 0, (struct sockaddr *)&receiver_addr, &addrLen) < 0) {
+            perror("Error: Failed to receive ACK packet - Handling Acks\n");
+            exit(EXIT_FAILURE);
+        }
 
-        if (bytes_read > 0 && ackPacket.ackBit && (ackPacket.ackNum >= currentSeqNum)) {
+        // size_t bytes_read = recvfrom(sockfd, &ackPacket, sizeof(ackPacket), 0, &receiver_addr, sizeof(receiver_addr));
+        // printf("Received ACK packet with sequence number %d\n", ackPacket.seqNum);
+
+        if (/*bytes_read > 0 && ackPacket.ackBit &&*/ (ackPacket.ackNum >= currentSeqNum)) {
             currentSeqNum = ackPacket.ackNum + 1;
         } else {
             // Finish sending data because of packet loss and end thread and join it back
@@ -260,6 +295,7 @@ void rsend(char* hostname,
                 perror("pthread_join");
                 exit(EXIT_FAILURE);
             }
+            // printf("Thread joined back\n");
             send_rate = send_rate / DECREASE_RATE;
 
             // sendArgs added to last send that has been acknowledged
@@ -267,16 +303,22 @@ void rsend(char* hostname,
             sendArgs.currentSeq = currentSeqNum;
             sendArgs.sockfd = sockfd;
             sendArgs.receiver_addr = &receiver_addr;
-            sendArgs.bytesTransferred = &bytesTransferred;
+            sendArgs.bytesTransferred = bytesTransferred;
             sendArgs.bytesToTransfer = bytesToTransfer;
+            sendArgs.addrLen = addrLen;
 
             // start sending again 
+            pthread_mutex_lock(&thread_lock);
+            continue_thread = 1;
+            pthread_mutex_unlock(&thread_lock);
             if (pthread_create(&sender_thread_id, NULL, send_packets_continuously, (void *)&sendArgs)) {
                 perror("Error: failed to create transmission thread");
                 exit(EXIT_FAILURE);
             }
         }
    }
+   
+   disconnect_from_receiver(sockfd, sender_packet, receive_packet, receiver_addr, currentSeqNum, addrLen);
 }
 
 
